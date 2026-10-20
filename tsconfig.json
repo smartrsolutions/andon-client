@@ -1,0 +1,21 @@
+{
+  // CommonJS out, because Node-RED loads its nodes with require() and the Node-RED
+  // package is this package's first user; ESM projects import CommonJS as they are.
+  // ES2022 is what Node 18, the oldest supported, runs without help.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2022"],
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": true,
+    "sourceMap": false,
+    "strict": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}

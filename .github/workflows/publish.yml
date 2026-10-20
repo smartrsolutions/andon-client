@@ -1,0 +1,81 @@
+# Publishes the package to npm, started by the tag v<version> that a release
+# pushes to this repository. It can also be started by hand for such a tag
+# (Actions, "Run workflow", pick the tag), should the push not have started it.
+#
+# No npm token: npm trusts this workflow in this repository through OIDC
+# ("trusted publishing"), and attaches a provenance statement that ties the
+# tarball to the commit it was built from. Both need a GitHub-hosted runner.
+# https://docs.npmjs.com/trusted-publishers
+#
+# The exception is the very first release. A trusted publisher can only be
+# configured for a package that exists, so that one run publishes with the
+# environment secret NPM_TOKEN; the secret is deleted afterwards.
+#
+# The environment "npm" is where a required reviewer is configured: the run waits
+# there until a person approves it.
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write # the OIDC token npm exchanges; also signs the provenance
+    steps:
+      # Actions are pinned to a commit: a moved tag must not change what publishes.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          # Trusted publishing needs npm 11.5.1 or newer, which Node 24 brings.
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - name: The tag names the version in package.json
+        id: release
+        env:
+          # Only to see whether it is set. The token itself is handed to the one
+          # step that publishes with it, never to npm ci or the tests.
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json version $version" >&2
+            exit 1
+          fi
+          # A pre-release (1.1.0-beta.1) must not become what `npm install` picks.
+          case $version in
+            *-*) echo "dist_tag=beta" >> "$GITHUB_OUTPUT" ;;
+            *) echo "dist_tag=latest" >> "$GITHUB_OUTPUT" ;;
+          esac
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "auth=token" >> "$GITHUB_OUTPUT"
+          else
+            echo "auth=oidc" >> "$GITHUB_OUTPUT"
+          fi
+      # No install scripts: this job can mint the token that publishes, and a
+      # dependency's script has no business running next to it.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      # npm test builds dist/ (TypeScript) and tests that build, which is what
+      # npm publish then packs: dist/ is never committed.
+      - run: npm test
+      - name: Publish
+        if: steps.release.outputs.auth == 'oidc'
+        env:
+          DIST_TAG: ${{ steps.release.outputs.dist_tag }}
+        run: npm publish --tag "$DIST_TAG"
+      - name: Publish with a token (first release only)
+        if: steps.release.outputs.auth == 'token'
+        env:
+          DIST_TAG: ${{ steps.release.outputs.dist_tag }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --tag "$DIST_TAG"
