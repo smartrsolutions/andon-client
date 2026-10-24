@@ -19,7 +19,7 @@ export const WRITE_SECRET = /^ws_[A-Za-z0-9_-]{43}$/;
  * configurator writes base64url, older notes may carry the other spelling.
  */
 export function parseKey(text: string): Buffer {
-    const normalised = String(text || '').trim().replace(/-/g, '+').replace(/_/g, '/');
+    const normalised = String(text || '').trim().replaceAll('-', '+').replaceAll('_', '/');
     const raw = Buffer.from(normalised, 'base64');
     if (raw.length !== 32) {
         throw new Error('content key decodes to ' + raw.length + ' bytes, expected 32');
@@ -47,8 +47,10 @@ export interface StatusedDocument {
  */
 export function fingerprint(doc: StatusedDocument): string {
     const parts = doc.tiles
-        .map((tile) => tile.id + '=' + (tile.status === undefined || tile.status === null ? '-' : tile.status))
-        .sort();
+        .map((tile) => tile.id + '=' + (tile.status ?? '-'))
+        // By UTF-16 code unit, as sort() without a function does, never by locale: the
+        // fingerprint has to be the same everywhere (spec/envelope.md, notify).
+        .sort((a, b) => (a < b ? -1 : Number(a > b)));
     return crypto.createHash('sha256').update(parts.join('\n'), 'utf8').digest('hex');
 }
 

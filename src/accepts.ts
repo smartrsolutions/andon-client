@@ -73,8 +73,8 @@ function seriesOf(tile: Tile): any[] {
 
 // The last few values a series holds, whatever its form: what the examples are made of.
 function valuesOf(series: any, fallback: number): number[] {
-    let v: unknown[] = Array.isArray(series.samples) ? series.samples.map((p: any) => p && p[1])
-        : Array.isArray(series.points) ? series.points : [];
+    let v: unknown[] = [];
+    if (Array.isArray(series.samples)) { v = series.samples.map((p: any) => p?.[1]); } else if (Array.isArray(series.points)) { v = series.points; }
     v = v.filter((x) => typeof x === 'number').slice(-4);
     return v.length ? (v as number[]) : [fallback, fallback + 1, fallback - 1];
 }
@@ -89,25 +89,26 @@ function timeSeriesForms(tile: Tile, now: number): Form[] {
     const all = seriesOf(tile);
     if (!all.length) { return []; }
     const vals = all.map((s) => valuesOf(s, numberOf(tile, 42)));
-    const last = vals[0][vals[0].length - 1];
+    const last = vals[0].at(-1);
     const out: Form[] = [];
 
     if (!Array.isArray(all[0].points)) {
-        out.push(form('append', last));
-        out.push(form('appendAt', last, {}, { timestamp: { example: iso(now) } }));
+        out.push(form('append', last), form('appendAt', last, {}, { timestamp: { example: iso(now) } }));
         if (all.length > 1) {
-            out.push(form('appendTo', vals[1][vals[1].length - 1], {}, { series: { example: all[1].name } }));
+            out.push(form('appendTo', vals[1].at(-1), {}, { series: { example: all[1].name } }));
         }
     }
-    out.push(form('pairs', pairsOf(vals[0], now)));
-    out.push(form('samples', { series: all.map((s, k) => ({ name: s.name, samples: pairsOf(vals[k], now) })) }));
-    // The step form with its last point at now.
-    out.push(form('steps', {
-        series: all.map((s, k) => {
-            const step = s.stepSec > 0 ? s.stepSec : 3600;
-            return { name: s.name, start: iso(now - (vals[k].length - 1) * step * 1000), stepSec: step, points: vals[k] };
+    out.push(
+        form('pairs', pairsOf(vals[0], now)),
+        form('samples', { series: all.map((s, k) => ({ name: s.name, samples: pairsOf(vals[k], now) })) }),
+        // The step form with its last point at now.
+        form('steps', {
+            series: all.map((s, k) => {
+                const step = s.stepSec > 0 ? s.stepSec : 3600;
+                return { name: s.name, start: iso(now - (vals[k].length - 1) * step * 1000), stepSec: step, points: vals[k] };
+            }),
         }),
-    }));
+    );
     return out;
 }
 
@@ -143,7 +144,7 @@ function tableForms(tile: Tile): Form[] {
 }
 
 function timelineForms(tile: Tile, now: number): Form[] {
-    const states = (Array.isArray(tile.states) ? tile.states : []).map((s: any) => s && s.id).filter(Boolean);
+    const states = (Array.isArray(tile.states) ? tile.states : []).map((s: any) => s?.id).filter(Boolean);
     if (!states.length) { return []; }
     const lanes = (Array.isArray(tile.lanes) ? tile.lanes : []).filter((l: any) => l && typeof l.name === 'string');
     const out = [

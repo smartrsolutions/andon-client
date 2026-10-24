@@ -24,7 +24,7 @@ import type { ViewDocument } from './document';
 import type { PutResult } from './relay';
 import { THROTTLE_SEC } from './relay';
 import { fingerprint, seal } from './seal';
-import { apply, finish, InputError, type SeriesWindow, type Update } from './tiles';
+import { apply, finish, type SeriesWindow, type Update } from './tiles';
 import { summary, tileOf, validate, type Issue } from './validate';
 import { API_WORDS, type Words } from './words';
 
@@ -33,7 +33,7 @@ const MAX_BACKOFF_SEC = 300;
 /** A value that leaves the document invalid. The document stays as it was. */
 export class ValidationError extends Error {}
 
-export { InputError };
+export { InputError } from './tiles';
 
 export type Notify = 'auto' | 'always' | 'never';
 
@@ -104,9 +104,9 @@ export class ViewRuntime {
     readonly staleAfterSec: number;
     doc: ViewDocument | null;
 
-    private o: RuntimeOptions;
-    private clock: Clock;
-    private words: Words;
+    private readonly o: RuntimeOptions;
+    private readonly clock: Clock;
+    private readonly words: Words;
     private lastFingerprint: string | undefined;
     // Series and lanes that already hold real data (tiles.ts, fromTemplate).
     // null: the whole document came from the source, nothing is template.
@@ -117,7 +117,7 @@ export class ViewRuntime {
     private lastUpload: number | null = null; // ms of the last 204
     private notBefore = 0;      // Retry-After or backoff
     private failures = 0;
-    private sources = new Set<unknown>();
+    private readonly sources = new Set<unknown>();
     private timer: unknown = null;
     private inFlight: Promise<PutResult> | null = null;
     private closed = false;
@@ -128,10 +128,16 @@ export class ViewRuntime {
         this.words = options.words || API_WORDS;
         this.intervalSec = Math.max(THROTTLE_SEC, Number(options.intervalSec) || 30);
         this.staleAfterSec = Number(options.staleAfterSec) > 0 ? Number(options.staleAfterSec) : this.intervalSec * 3;
-        this.doc = options.restored && options.restored.doc ? options.restored.doc : options.template || null;
-        this.lastFingerprint = options.restored ? options.restored.fingerprint : undefined;
-        this.live = options.restored && Array.isArray(options.restored.live) ? new Set(options.restored.live)
-            : options.restored && options.restored.live === null ? null : new Set();
+        const restored = options.restored;
+        this.doc = restored?.doc || options.template || null;
+        this.lastFingerprint = restored ? restored.fingerprint : undefined;
+        if (Array.isArray(restored?.live)) {
+            this.live = new Set(restored.live);
+        } else if (restored?.live === null) {
+            this.live = null;
+        } else {
+            this.live = new Set();
+        }
     }
 
     private emit(event: RuntimeEvent): void {
@@ -213,7 +219,8 @@ export class ViewRuntime {
         this.sources.clear();
 
         const fp = fingerprint(doc);
-        const notify = this.o.notify === 'always' ? true : this.o.notify === 'never' ? false : fp !== this.lastFingerprint;
+        let notify = fp !== this.lastFingerprint;
+        if (this.o.notify === 'always') { notify = true; } else if (this.o.notify === 'never') { notify = false; }
         let sealed;
         try {
             sealed = seal(doc, { view: this.o.view, kv: this.o.kv, key: this.o.key, notify });

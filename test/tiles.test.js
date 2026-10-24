@@ -25,6 +25,21 @@ test('numeric text from MQTT becomes a number', () => {
     assert.equal(tile(doc, 't_oee').value, 81.5);
 });
 
+test('numeric text is what the earlier pattern took, and a long run of digits costs no time', () => {
+    // The pattern of 1.0.0, which backtracked quadratically on a run of digits that does not match.
+    const before = /^\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*$/;
+    const texts = ['81.5', ' 81.5 ', '\t7\n', ' 1e3﻿', '-2', '+3.0E-2', '1.', '.5', '0007', '1e', '1.2.3', '', ' ', '.', 'e3',
+        '0x10', 'Infinity', 'NaN', '1_000', '1,5', '--1', '+.5e+7', '5 5'];
+    for (const text of texts) {
+        let took = true;
+        try { apply(template(), { topic: 't_oee', payload: text }, opts()); } catch { took = false; }
+        assert.equal(took, before.test(text), JSON.stringify(text));
+    }
+    const start = process.hrtime.bigint();
+    assert.throws(() => apply(template(), { topic: 't_oee', payload: '1'.repeat(50000) + 'x' }, opts()), InputError);
+    assert.ok(process.hrtime.bigint() - start < 500_000_000n, 'refused within half a second');
+});
+
 test('text for a gauge is refused and names the tile', () => {
     assert.throws(() => apply(template(), { topic: 't_oee', payload: 'hoch' }, opts()), (e) => e instanceof InputError && /t_oee/.test(e.message));
 });

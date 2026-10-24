@@ -14,9 +14,16 @@ export const THROTTLE_SEC = 10;
 
 type Env = Record<string, string | undefined>;
 
+/** noTrailingSlash drops the slashes a URL ends in; a loop, as /\/+$/ backtracks on long runs of slashes. */
+export function noTrailingSlash(url: string): string {
+    let end = url.length;
+    while (end > 0 && url[end - 1] === '/') { end--; }
+    return url.slice(0, end);
+}
+
 /** relayUrl is ANDON_RELAY_URL without a trailing slash, or the public relay. */
 export function relayUrl(env?: Env): string {
-    const value = String((env || process.env).ANDON_RELAY_URL || '').trim().replace(/\/+$/, '');
+    const value = noTrailingSlash(String((env || process.env).ANDON_RELAY_URL || '').trim());
     return value || DEFAULT_RELAY;
 }
 
@@ -29,18 +36,26 @@ export function relayUrl(env?: Env): string {
 export function relayAliases(env?: Env): string[] {
     return String((env || process.env).ANDON_RELAY_ALIASES || '')
         .split(',')
-        .map((s) => s.trim().replace(/\/+$/, ''))
+        .map((s) => noTrailingSlash(s.trim()))
         .filter(Boolean);
 }
 
 function errorCode(text: string): string {
-    if (!text || text[0] !== '{') { return ''; }
+    if (!text?.startsWith('{')) { return ''; }
     try {
         const parsed = JSON.parse(text);
         return typeof parsed.error === 'string' ? parsed.error : '';
-    } catch (e) {
-        return '';
+    } catch {
+        return ''; // not the relay's JSON (a proxy's page, say): no code to report
     }
+}
+
+/** unreachable says why a request got no answer at all. */
+function unreachable(err: any): string {
+    if (err?.name === 'AbortError') { return 'the relay did not answer within ' + TIMEOUT_MS / 1000 + ' s'; }
+    let why: string;
+    if (err?.cause?.code) { why = err.cause.code; } else if (err?.message) { why = err.message; } else { why = String(err); }
+    return 'the relay could not be reached: ' + why;
 }
 
 /** hint says what to change, per the relay's answers. */
@@ -96,7 +111,7 @@ export async function put({ base, view, writeSecret, envelope, fetchImpl, hints 
         });
         const text = res.status === 204 ? '' : (await res.text().catch(() => '')).slice(0, 300);
         const code = errorCode(text);
-        const retryAfter = Number(res.headers && res.headers.get ? res.headers.get('retry-after') : NaN);
+        const retryAfter = Number(res.headers?.get ? res.headers.get('retry-after') : Number.NaN);
         if (res.status === 204) { return { outcome: 'ok', status: 204 }; }
         if (res.status === 429) {
             return { outcome: 'throttled', status: 429, code, message: say(429, code || 'throttled'), retryAfterSec: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : THROTTLE_SEC };
@@ -104,9 +119,7 @@ export async function put({ base, view, writeSecret, envelope, fetchImpl, hints 
         if (res.status >= 500) { return { outcome: 'retry', status: res.status, code, message: say(res.status, code) }; }
         return { outcome: 'fatal', status: res.status, code, message: say(res.status, code) };
     } catch (err: any) {
-        const message = err && err.name === 'AbortError' ? 'the relay did not answer within ' + TIMEOUT_MS / 1000 + ' s'
-            : 'the relay could not be reached: ' + (err && err.cause && err.cause.code ? err.cause.code : err && err.message ? err.message : String(err));
-        return { outcome: 'retry', status: 0, code: 'network', message };
+        return { outcome: 'retry', status: 0, code: 'network', message: unreachable(err) };
     } finally {
         clearTimeout(timer);
     }

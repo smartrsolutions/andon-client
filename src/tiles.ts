@@ -89,18 +89,23 @@ export function iso(ms: number): string {
 
 function timestampOf(value: unknown, now: number, words: Words): number {
     if (value === undefined || value === null || value === '') { return now; }
-    const ms = value instanceof Date ? value.getTime() : typeof value === 'number' ? value : Date.parse(value as string);
+    let ms: number;
+    if (value instanceof Date) { ms = value.getTime(); } else if (typeof value === 'number') { ms = value; } else { ms = Date.parse(value as string); }
     if (!Number.isFinite(ms)) { throw new InputError(words.timestamp + ' is neither milliseconds nor an ISO timestamp: ' + String(value)); }
     return ms;
 }
 
 const NUMERIC_KINDS = new Set(['gauge', 'progress', 'line', 'donut']);
-const NUMERIC = /^\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*$/;
+// The digits before and after the point are matched once each: \d+\.?\d* backtracks
+// quadratically on a long run of digits that does not match. Surrounding white space
+// goes by trim(), which removes exactly what \s matches.
+const NUMERIC = /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/;
+const numeric = (text: string) => NUMERIC.test(text.trim());
 
 /** number takes numbers and numeric strings: MQTT and most PLCs deliver text. */
 function number(value: unknown, what: string): number {
     if (typeof value === 'number' && Number.isFinite(value)) { return value; }
-    if (typeof value === 'string' && NUMERIC.test(value)) { return Number(value); }
+    if (typeof value === 'string' && numeric(value)) { return Number(value); }
     throw new InputError(what + ' needs a number, got ' + JSON.stringify(value));
 }
 
@@ -119,7 +124,7 @@ export function statusFromBands(tile: Tile): string | undefined {
     for (const band of tile.bands) {
         if (tile.value <= band.to) { return band.status; }
     }
-    return tile.bands[tile.bands.length - 1].status;
+    return tile.bands.at(-1).status;
 }
 
 function pickSeries(tile: Tile, name: unknown): any {
@@ -164,14 +169,15 @@ function appendSample(tile: Tile, value: number, ctx: Context): void {
             '" uses ' + (series.points ? 'stepSec and points' : 'values'));
     }
     if (fromTemplate(ctx, tile.id + '|series|' + series.name)) { series.samples = []; }
-    const samples: [string, number][] = Array.isArray(series.samples) ? series.samples : (series.samples = []);
+    if (!Array.isArray(series.samples)) { series.samples = []; }
+    const samples: [string, number][] = series.samples;
     const at = timestampOf(ctx.timestamp, ctx.now, ctx.words);
     const stamp = iso(at);
-    const last = samples[samples.length - 1];
+    const last = samples.at(-1);
     if (last && Date.parse(last[0]) > Date.parse(stamp)) {
         throw new InputError('tile "' + tile.id + '": ' + stamp + ' is older than the last sample ' + last[0]);
     }
-    if (last && last[0] === stamp) {
+    if (last?.[0] === stamp) {
         last[1] = value; // two values within one second: the later one wins
     } else {
         samples.push([stamp, value]);
@@ -202,14 +208,15 @@ function appendSegment(tile: Tile, stateId: string, ctx: Context): boolean {
             (lanes.length ? '; it has ' + lanes.map((l: any) => '"' + l.name + '"').join(', ') : ''));
     }
     if (fromTemplate(ctx, tile.id + '|lane|' + lane.name)) { lane.segments = []; }
-    const segments: [string, string][] = Array.isArray(lane.segments) ? lane.segments : (lane.segments = []);
-    const last = segments[segments.length - 1];
-    if (last && last[1] === stateId) { return false; } // the state goes on; nothing to record
+    if (!Array.isArray(lane.segments)) { lane.segments = []; }
+    const segments: [string, string][] = lane.segments;
+    const last = segments.at(-1);
+    if (last?.[1] === stateId) { return false; } // the state goes on; nothing to record
     const stamp = iso(timestampOf(ctx.timestamp, ctx.now, ctx.words));
     if (last && Date.parse(last[0]) > Date.parse(stamp)) {
         throw new InputError('tile "' + tile.id + '": ' + stamp + ' is older than the last segment ' + last[0]);
     }
-    if (last && last[0] === stamp) {
+    if (last?.[0] === stamp) {
         last[1] = stateId;
     } else {
         segments.push([stamp, stateId]);
@@ -234,7 +241,7 @@ function trimSegments(tile: Tile, segments: [string, string][]): void {
             // tile.from verbatim, not iso(from): a `from` with milliseconds is
             // valid, and rounding it down would start the segment before it.
             if (Date.parse(running[0]) < from) { running[0] = tile.from; }
-            if (segments[1] && segments[1][0] === running[0]) { segments.shift(); }
+            if (segments[1]?.[0] === running[0]) { segments.shift(); }
         }
     }
     if (segments.length > MAX_SEGMENTS) { segments.splice(0, segments.length - MAX_SEGMENTS); }
@@ -257,10 +264,10 @@ function setFields(tile: Tile, fields: Record<string, unknown>): boolean {
     // A new `from` trims every lane at once, not only at the next state change: a
     // rolling timeline moves `from` on every tick, and in between the segments would
     // start before it.
-    if (tile.view === 'timeline' && Object.prototype.hasOwnProperty.call(fields, 'from') && Array.isArray(tile.lanes)) {
+    if (tile.view === 'timeline' && Object.hasOwn(fields, 'from') && Array.isArray(tile.lanes)) {
         tile.lanes.forEach((lane: any) => { if (lane && Array.isArray(lane.segments)) { trimSegments(tile, lane.segments); } });
     }
-    return Object.prototype.hasOwnProperty.call(fields, 'status');
+    return Object.hasOwn(fields, 'status');
 }
 
 /**
@@ -287,7 +294,7 @@ function updateTile(tile: Tile, payload: unknown, ctx: Context): Tile {
             const series = pickSeries(next, ctx.series);
             next.series[next.series.indexOf(series)] = { name: series.name, samples: clone(payload) };
             markReal(ctx, tile.id + '|series|' + series.name);
-            const last = payload[payload.length - 1];
+            const last = payload.at(-1);
             if (kind === 'line' && Array.isArray(last) && typeof last[1] === 'number') { next.value = last[1]; }
         } else {
             throw new InputError('tile "' + tile.id + '" takes no array');
@@ -295,13 +302,13 @@ function updateTile(tile: Tile, payload: unknown, ctx: Context): Tile {
     } else if (typeof payload === 'object') {
         const fields = payload as Record<string, unknown>;
         statusGiven = setFields(next, fields);
-        (Array.isArray(fields.series) ? fields.series : []).forEach((s: any) => { if (s && s.name) { markReal(ctx, tile.id + '|series|' + s.name); } });
-        (Array.isArray(fields.lanes) ? fields.lanes : []).forEach((l: any) => { if (l && l.name) { markReal(ctx, tile.id + '|lane|' + l.name); } });
+        (Array.isArray(fields.series) ? fields.series : []).forEach((s: any) => { if (s?.name) { markReal(ctx, tile.id + '|series|' + s.name); } });
+        (Array.isArray(fields.lanes) ? fields.lanes : []).forEach((l: any) => { if (l?.name) { markReal(ctx, tile.id + '|lane|' + l.name); } });
     } else if (kind === 'label') {
         // A label keeps the type its template gave it: "79.3" from MQTT stays a
         // number when the template has a number, and "Läuft" stays a text.
-        const numeric = typeof payload === 'number' || (typeof tile.value === 'number' && NUMERIC.test(String(payload)));
-        next.value = numeric ? number(payload, 'tile "' + tile.id + '"') : String(payload);
+        const isNumber = typeof payload === 'number' || (typeof tile.value === 'number' && numeric(String(payload)));
+        next.value = isNumber ? number(payload, 'tile "' + tile.id + '"') : String(payload);
     } else if (kind === 'gauge' || kind === 'progress' || kind === 'donut') {
         next.value = number(payload, 'tile "' + tile.id + '"');
     } else if (kind === 'line' || (kind === 'bar' && !categories)) {
@@ -313,7 +320,7 @@ function updateTile(tile: Tile, payload: unknown, ctx: Context): Tile {
     }
 
     if (!changed) { return tile; }
-    if (!statusGiven && ctx.derive && ctx.derive.has(next.id)) {
+    if (!statusGiven && ctx.derive?.has(next.id)) {
         const status = statusFromBands(next);
         if (status) { next.status = status; }
     }
@@ -357,7 +364,7 @@ export function apply(doc: ViewDocument | null, update: Update, options: ApplyOp
         throw new InputError(words.topic + ' is missing: set it to the ID of the tile this value belongs to');
     }
 
-    const next: ViewDocument = Object.assign({}, doc, { tiles: doc.tiles.slice() });
+    const next: ViewDocument = { ...doc, tiles: doc.tiles.slice() };
     const changed: string[] = [];
     for (const [id, value] of updates) {
         const index = next.tiles.findIndex((t) => t.id === id);
@@ -384,7 +391,7 @@ export function apply(doc: ViewDocument | null, update: Update, options: ApplyOp
 
 /** finish fills in what the source never sends itself: when, and how long it holds. */
 export function finish(doc: ViewDocument, { now, staleAfterSec }: { now: number; staleAfterSec: number }): ViewDocument {
-    const out: ViewDocument = Object.assign({}, doc, { generatedAt: iso(now) });
+    const out: ViewDocument = { ...doc, generatedAt: iso(now) };
     if (staleAfterSec > 0) { out.staleAfterSec = staleAfterSec; }
     return out;
 }

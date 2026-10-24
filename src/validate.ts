@@ -68,10 +68,10 @@ function intendedBranch(e: ErrorObject): ValidateFunction | null {
     let bestScore = -1;
     let tie = false;
     for (const branch of e.schema) {
-        const check = branch && branch.$ref ? ajv.getSchema(schema.$id + branch.$ref) : undefined;
-        const props = check && check.schema && (check.schema as any).properties;
+        const check = branch?.$ref ? ajv.getSchema(schema.$id + branch.$ref) : undefined;
+        const props = (check?.schema as any)?.properties;
         if (!check || !props) { return null; }
-        const score = Object.keys(data).filter((k) => Object.prototype.hasOwnProperty.call(props, k)).length;
+        const score = Object.keys(data).filter((k) => Object.hasOwn(props, k)).length;
         if (score > bestScore) { best = check; bestScore = score; tie = false; } else if (score === bestScore) { tie = true; }
     }
     return tie ? null : best;
@@ -91,7 +91,7 @@ function narrowOneOf(errors: ErrorObject[]): ErrorObject[] {
         if (!check || check(e.data)) { continue; }
         const at = e.instancePath;
         const inside = (x: ErrorObject) => x.instancePath === at || x.instancePath.startsWith(at + '/');
-        const mine = narrowOneOf(check.errors || []).map((x) => Object.assign({}, x, { instancePath: at + x.instancePath }));
+        const mine = narrowOneOf(check.errors || []).map((x) => ({ ...x, instancePath: at + x.instancePath }));
         out = out.filter((x) => !inside(x) || x === e).concat(mine);
     }
     return out;
@@ -194,7 +194,8 @@ function semanticIssues(doc: any): Issue[] {
         }
         if (tile.view === 'line' && Array.isArray(tile.series)) {
             tile.series.forEach((s: any, si: number) => {
-                const n = s && Array.isArray(s.samples) ? s.samples.length : s && Array.isArray(s.points) ? s.points.length : 0;
+                let n = 0;
+                if (Array.isArray(s?.samples)) { n = s.samples.length; } else if (Array.isArray(s?.points)) { n = s.points.length; }
                 if (n > 500) { warning(p + '/series/' + si, n + ' points; 30 to 60 are enough for one screen'); }
                 if (s && Array.isArray(s.samples)) {
                     let last = -Infinity;

@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): a major version may
 break existing code, and its entry says what to change.
 
+## 1.0.1
+
+- Checking whether a text is a number no longer takes time quadratic in its
+  length: a long run of digits that is not a number is refused at once. What
+  counts as a number is the same as before.
+- A relay address ending in many slashes is trimmed in linear time.
+- The README names the configurator's download as it is called: `view.json`.
+
 ## 1.0.0
 
 The first version.

@@ -10,7 +10,8 @@ you send.
 ## Getting started
 
 1. **Design** your tiles in the [Andon configurator](https://andon.app/en/configurator)
-   and create the view there. Download the `.env` and the template.
+   and create the view there. Download the `.env` and the document, `view.json`:
+   it is the template your values fill.
 2. **Pair** your iPhone or iPad: scan the configurator's QR code with the
    [Andon app](https://apps.apple.com/app/id6819064723).
 3. **Install** this package: `npm install @smartrsolutions/andon-client`.
@@ -23,7 +24,7 @@ import { AndonView } from '@smartrsolutions/andon-client';
 // ANDON_VIEW, ANDON_WRITE_SECRET, ANDON_CONTENT_KEY, ANDON_KEY_VERSION:
 // the names the .env from the configurator uses.
 const view = AndonView.fromEnv({
-  template: readFileSync('template.json', 'utf8'),
+  template: readFileSync('view.json', 'utf8'),
 });
 
 view.set('t_oee', 79.3);                           // one tile

@@ -7,7 +7,7 @@
 
 import type { ViewDocument } from './document';
 import * as envFile from './env';
-import { DEFAULT_RELAY, put, relayUrl, type PutResult } from './relay';
+import { DEFAULT_RELAY, noTrailingSlash, put, relayUrl, type PutResult } from './relay';
 import { parseKey, parseKeyVersion, VIEW_ID, WRITE_SECRET } from './seal';
 import { DEFAULT_WINDOW, type SeriesWindow } from './tiles';
 import { summary, validate } from './validate';
@@ -89,7 +89,7 @@ function templateOf(value: AndonViewOptions['template']): ViewDocument | null {
 }
 
 export class AndonView {
-    private runtime: ViewRuntime;
+    private readonly runtime: ViewRuntime;
     private closing: Promise<void> | null = null;
 
     constructor(options: AndonViewOptions) {
@@ -100,7 +100,7 @@ export class AndonView {
         const key = Buffer.isBuffer(options.contentKey) ? options.contentKey : parseKey(options.contentKey);
         if (key.length !== 32) { throw new Error('content key is ' + key.length + ' bytes, expected 32'); }
         const kv = parseKeyVersion(options.keyVersion === undefined || options.keyVersion === '' ? 1 : options.keyVersion);
-        const base = String(options.relayUrl || relayUrl()).trim().replace(/\/+$/, '') || DEFAULT_RELAY;
+        const base = noTrailingSlash(String(options.relayUrl || relayUrl()).trim()) || DEFAULT_RELAY;
         const onError = options.onError || ((e) => console.warn('andon: ' + e.message));
 
         this.runtime = new ViewRuntime({
@@ -110,7 +110,7 @@ export class AndonView {
             notify: options.notify || 'auto',
             intervalSec: options.intervalSec,
             staleAfterSec: options.staleAfterSec,
-            window: Object.assign({}, DEFAULT_WINDOW, options.window),
+            window: { ...DEFAULT_WINDOW, ...options.window },
             derive: new Set(options.deriveStatus || []),
             template: templateOf(options.template),
             clock: options.clock,
@@ -140,15 +140,16 @@ export class AndonView {
             if (!value) { throw new Error(envFile.name(prefix, suffix) + ' is not set'); }
             return value;
         };
-        const own = envFile.pick(prefix, 'URL', env).replace(/\/+$/, '');
+        const own = noTrailingSlash(envFile.pick(prefix, 'URL', env));
         const { prefix: _prefix, env: _env, ...rest } = options;
-        return new AndonView(Object.assign({}, rest, {
+        return new AndonView({
+            ...rest,
             view: need('VIEW'),
             writeSecret: need('WRITE_SECRET'),
             contentKey: need('CONTENT_KEY'),
             keyVersion: envFile.pick(prefix, 'KEY_VERSION', env) || 1,
             relayUrl: options.relayUrl || own || relayUrl(env),
-        }));
+        });
     }
 
     /**
@@ -166,12 +167,12 @@ export class AndonView {
         this.open();
         if (typeof first === 'string') {
             if (!first.trim()) { throw new TypeError('set needs a tile ID'); }
-            return this.runtime.receive(Object.assign({ topic: first, payload: second }, this.extra(third)));
+            return this.runtime.receive({ topic: first, payload: second, ...this.extra(third) });
         }
         if (!first || typeof first !== 'object' || Array.isArray(first) || Array.isArray((first as any).tiles)) {
             throw new TypeError('set takes a tile ID and a value, or an object of tile IDs and values; replace() takes a whole view document');
         }
-        return this.runtime.receive(Object.assign({ payload: first }, this.extra(second as SetOptions | undefined)));
+        return this.runtime.receive({ payload: first, ...this.extra(second as SetOptions | undefined) });
     }
 
     /** replace swaps in a whole view document: for a source that builds its tiles itself. */
@@ -202,13 +203,11 @@ export class AndonView {
      * timer, so the process can exit. The view takes no values afterwards.
      */
     close(options: { flush?: boolean } = {}): Promise<void> {
-        if (!this.closing) {
-            this.closing = (async () => {
-                if (options.flush !== false) { await this.flush(); }
-                await this.runtime.idle();
-                this.runtime.close();
-            })();
-        }
+        this.closing ??= (async () => {
+            if (options.flush !== false) { await this.flush(); }
+            await this.runtime.idle();
+            this.runtime.close();
+        })();
         return this.closing;
     }
 

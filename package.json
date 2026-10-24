@@ -1,6 +1,6 @@
 {
   "name": "@smartrsolutions/andon-client",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Send values from Node.js to the Andon app for iPhone and iPad: end-to-end encrypted tiles and widgets.",
   "keywords": [
     "andon",

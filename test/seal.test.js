@@ -57,3 +57,11 @@ test('the fingerprint depends on statuses, not on order or values', () => {
     assert.equal(a, fingerprint({ tiles: [{ id: 'b', status: null }, { id: 'a', status: 'ok' }] }));
     assert.notEqual(a, fingerprint({ tiles: [{ id: 'a', status: 'warning' }, { id: 'b' }] }));
 });
+
+test('the fingerprint sorts by UTF-16 code unit, never by locale', () => {
+    const ids = ['b', 'ä', 'B', 'a', 'Z', '_'];
+    const tiles = ids.map((id) => ({ id, status: 'ok' }));
+    // Code unit order: "B" < "Z" < "_" < "a" < "b" < "ä"; a locale would put "a", "ä" and "b" together.
+    const expected = crypto.createHash('sha256').update(['B=ok', 'Z=ok', '_=ok', 'a=ok', 'b=ok', 'ä=ok'].join('\n'), 'utf8').digest('hex');
+    assert.equal(fingerprint({ tiles }), expected);
+});
